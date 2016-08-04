@@ -129,6 +129,7 @@ mv .gitignore.new .gitignore
 echo "* Fetching dependencies that are build in any case"
 get_repo nodejs/http-parser v2.7.0 http-parser
 get_repo philsquared/Catch v1.5.0 Catch
+get_repo ChaiScript/ChaiScript v5.8.1 ChaiScript
 
 echo "* Fetching geoip database"
 get_geoipdb

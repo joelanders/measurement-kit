@@ -57,6 +57,7 @@ example/ooni/http_invalid_request_line
 example/ooni/oonireport
 example/ooni/tcp_connect
 example/ooni/web_connectivity
+example/scripting/chai
 install-sh
 libtool
 ltmain.sh
@@ -64,6 +65,7 @@ m4/*.m4
 missing
 site
 src/ext/Catch/
+src/ext/ChaiScript/
 src/ext/http-parser/
 src/ext/json/
 stamp-h1

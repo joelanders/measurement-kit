@@ -1,0 +1,9 @@
+use("http.chai")
+
+var result = http_request([
+        "http/url": "http://www.google.com/robots.txt"
+    ], [
+        "Accept": "*/*"
+    ], "");
+
+print(result[0])
