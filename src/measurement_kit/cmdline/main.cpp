@@ -26,6 +26,7 @@ static const struct {
     XX(dns_query),
     XX(http_invalid_request_line),
     XX(http_request),
+    XX(meek_fronting),
     XX(mlabns),
     XX(multi_ndt),
     XX(ndt),
