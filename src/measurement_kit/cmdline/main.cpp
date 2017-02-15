@@ -24,6 +24,7 @@ static const struct {
 } modules[] = {
     XX(dns_injection),
     XX(dns_query),
+    XX(http_header_field_manipulation),
     XX(http_invalid_request_line),
     XX(http_request),
     XX(meek_fronting),
