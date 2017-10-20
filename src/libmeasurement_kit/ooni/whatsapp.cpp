@@ -199,14 +199,21 @@ bool ip_in_nets(std::string ip, std::vector<std::string> nets) {
     return false;
 }
 
-static void tcp_many(std::vector<std::string> ips, SharedPtr<Entry> entry,
-        Settings options, SharedPtr<Reactor> reactor, SharedPtr<Logger> logger,
-        Callback<Error> cb) {
-    // two ports per IP
-    int ips_count = ips.size() * 2;
-    SharedPtr<int> ips_tested(new int(0));
+static void tcp_many(std::map<std::string, std::vector<std::string>> hostname_ipvs,
+        SharedPtr<Entry> entry, Settings options, SharedPtr<Reactor> reactor,
+        SharedPtr<Logger> logger, Callback<Error> cb) {
+    // all hostnames start here; are removed upon a TCP success
+    SharedPtr<std::set<std::string>> blocked_hostnames;
+    // at the end, we copy these ^ hostnames into the report:
+    (*entry)["whatsapp_endpoints_blocked"] = Entry::array();
+    size_t ips_count;
+    SharedPtr<size_t> ips_tested(new size_t(0));
+    for (auto const& hostname_ipv : hostname_ipvs) {
+        blocked_hostnames->insert(hostname_ipv.first);
+        ips_count += hostname_ipv.second.size() * 2; // two ports per IP
+    }
 
-    auto tcp_cb = [=](std::string ip, int port) {
+    auto tcp_cb = [=](std::string hostname, std::string ip, int port) {
         return [=](Error connect_err, SharedPtr<net::Transport> txp) {
             Entry result = {
                     {"ip", ip}, {"port", port},
@@ -220,43 +227,51 @@ static void tcp_many(std::vector<std::string> ips, SharedPtr<Entry> entry,
                 logger->info("tcp success to %s:%d", ip.c_str(), port);
                 result["status"]["success"] = true;
                 result["status"]["failure"] = false;
+                blocked_hostnames->erase(hostname);
             }
             (*entry)["tcp_connect"].push_back(result);
             txp->close(nullptr);
             *ips_tested += 1;
             if (ips_count == *ips_tested) {
+                for (auto const& hostname : *blocked_hostnames) {
+                    (*entry)["whatsapp_endpoints_blocked"].push_back(hostname);
+                }
                 cb(NoError());
             }
         };
     };
 
     // this is needed in case dns_many() returns no ips
-    if (ips.size() == 0) {
+    if (ips_count == 0) {
         cb(NoError());
         return;
     }
-    for (auto const &ip : ips) {
-        // XXX hardcoded
-        std::vector<int> ports{443, 5222};
-        for (auto const &port : ports) {
-            Settings local_options = options;
-            local_options["host"] = ip;
-            local_options["port"] = port;
-            templates::tcp_connect(
-                    local_options, tcp_cb(ip, port), reactor, logger);
+    for (auto const& hostname_ipv : hostname_ipvs) {
+        std::string hostname = hostname_ipv.first;
+        for (auto const& ip : hostname_ipv.second) {
+            // XXX hardcoded
+            std::vector<int> ports{443, 5222};
+            for (auto const &port : ports) {
+                Settings local_options = options;
+                local_options["host"] = ip;
+                local_options["port"] = port;
+                templates::tcp_connect(
+                    local_options, tcp_cb(hostname, ip, port), reactor, logger);
+            }
         }
     }
 }
 
 static void dns_many(std::vector<std::string> hostnames, SharedPtr<Entry> entry,
         Settings options, SharedPtr<Reactor> reactor, SharedPtr<Logger> logger,
-        Callback<Error, std::vector<std::string>> cb) {
+        Callback<Error, std::map<std::string, std::vector<std::string>>> cb) {
     // if ANYthing is consistent, we consider dns not blocked
     (*entry)["whatsapp_endpoints_status"] = "blocked";
-    (*entry)["whatsapp_endpoints_dns_inconsistent"] = {};
+    (*entry)["whatsapp_endpoints_dns_inconsistent"] = Entry::array();
     int names_count = hostnames.size();
     logger->info("whatsapp: %d hostnames", names_count);
-    SharedPtr<std::vector<std::string>> good_ips(new std::vector<std::string>);
+    //SharedPtr<std::vector<std::string>> good_ips(new std::vector<std::string>);
+    auto hostname_ipvs(new SharedPtr<std::map<std::string,std::vector<std::string>>>);
     SharedPtr<int> names_tested(new int(0));
 
     auto dns_cb = [=](std::string hostname) {
@@ -282,7 +297,8 @@ static void dns_many(std::vector<std::string> hostnames, SharedPtr<Entry> entry,
                     if (ip_in_nets(ip, WHATSAPP_NETS)) {
                         logger->info(
                                 "%s seems to belong to Whatsapp", ip.c_str());
-                        good_ips->push_back(ip);
+                        //good_ips->push_back(ip);
+                        (*hostname_ipvs)[hostname].push_back(ip);
                         (*entry)["whatsapp_endpoints_status"] = "ok";
                         this_host_consistent = true;
                     } else {
@@ -297,9 +313,12 @@ static void dns_many(std::vector<std::string> hostnames, SharedPtr<Entry> entry,
             }
             *names_tested += 1;
             if (names_count == *names_tested) {
-                logger->info("dns_many() found %d consistent ips",
-                        (int)good_ips->size());
-                cb(NoError(), *good_ips);
+                size_t ips_count = 0;
+                for (auto const& hostname_ipv : *hostname_ipvs) {
+                    ips_count += hostname_ipv.second.size();
+                }
+                logger->info("dns_many() found %d consistent ips", ips_count);
+                cb(NoError(), *hostname_ipvs);
             }
         };
     };
@@ -408,7 +427,8 @@ void whatsapp(Settings options, Callback<SharedPtr<report::Entry>> callback,
                             cb(ips);
                         });
             },
-            [=](std::vector<std::string> ips, Callback<> cb) {
+            [=](std::map<std::string,std::vector<std::string>> hostname_ipvs,
+                Callback<> cb) {
                 tcp_many(ips, entry, options, reactor, logger, [=](Error err) {
                     logger->info("saw %s in Whatsapp's endpoints (TCP)",
                             (!!err) ? "at least one error" : "no errors");
