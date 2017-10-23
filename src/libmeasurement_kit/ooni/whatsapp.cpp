@@ -4,10 +4,10 @@
 
 #include "private/ooni/constants.hpp"
 #include "private/ooni/whatsapp.hpp"
+#include "private/common/fcompose.hpp"
+#include "private/common/parallel.hpp"
+#include "private/common/utils.hpp"
 #include <cassert>
-#include <measurement_kit/common/detail/fcompose.hpp>
-#include <measurement_kit/common/detail/parallel.hpp>
-#include <measurement_kit/common/detail/utils.hpp>
 #include <measurement_kit/net/utils.hpp>
 #include <measurement_kit/ooni.hpp>
 #include <stdio.h>
@@ -204,14 +204,16 @@ static void tcp_many(std::map<std::string, std::vector<std::string>> hostname_ip
         SharedPtr<Logger> logger, Callback<Error> cb) {
     // all hostnames start here; are removed upon a TCP success
     SharedPtr<std::set<std::string>> blocked_hostnames;
+    logger->info("shit1");
     // at the end, we copy these ^ hostnames into the report:
     (*entry)["whatsapp_endpoints_blocked"] = Entry::array();
-    size_t ips_count;
+    size_t ips_count = 0;
     SharedPtr<size_t> ips_tested(new size_t(0));
     for (auto const& hostname_ipv : hostname_ipvs) {
         blocked_hostnames->insert(hostname_ipv.first);
         ips_count += hostname_ipv.second.size() * 2; // two ports per IP
     }
+    logger->info("shit2");
 
     auto tcp_cb = [=](std::string hostname, std::string ip, int port) {
         return [=](Error connect_err, SharedPtr<net::Transport> txp) {
@@ -271,7 +273,8 @@ static void dns_many(std::vector<std::string> hostnames, SharedPtr<Entry> entry,
     int names_count = hostnames.size();
     logger->info("whatsapp: %d hostnames", names_count);
     //SharedPtr<std::vector<std::string>> good_ips(new std::vector<std::string>);
-    auto hostname_ipvs(new SharedPtr<std::map<std::string,std::vector<std::string>>>);
+    SharedPtr<std::map<std::string,std::vector<std::string>>>
+        hostname_ipvs(new std::map<std::string,std::vector<std::string>>);
     SharedPtr<int> names_tested(new int(0));
 
     auto dns_cb = [=](std::string hostname) {
@@ -317,7 +320,7 @@ static void dns_many(std::vector<std::string> hostnames, SharedPtr<Entry> entry,
                 for (auto const& hostname_ipv : *hostname_ipvs) {
                     ips_count += hostname_ipv.second.size();
                 }
-                logger->info("dns_many() found %d consistent ips", ips_count);
+                logger->info("dns_many() found %d consistent ips", (int)ips_count);
                 cb(NoError(), *hostname_ipvs);
             }
         };
@@ -418,18 +421,18 @@ void whatsapp(Settings options, Callback<SharedPtr<report::Entry>> callback,
                             cb();
                         });
             },
-            [=](Callback<std::vector<std::string>> cb) {
+            [=](Callback<std::map<std::string,std::vector<std::string>>> cb) {
                 dns_many(whatsapp_endpoint_hostnames, entry, options, reactor,
-                        logger, [=](Error err, std::vector<std::string> ips) {
+                        logger, [=](Error err, std::map<std::string,std::vector<std::string>> hostname_ipvs) {
                             logger->info("saw %s in Whatsapp's endpoints (DNS)",
                                     (!!err) ? "at least one error"
                                             : "no errors");
-                            cb(ips);
+                            cb(hostname_ipvs);
                         });
             },
             [=](std::map<std::string,std::vector<std::string>> hostname_ipvs,
                 Callback<> cb) {
-                tcp_many(ips, entry, options, reactor, logger, [=](Error err) {
+                tcp_many(hostname_ipvs, entry, options, reactor, logger, [=](Error err) {
                     logger->info("saw %s in Whatsapp's endpoints (TCP)",
                             (!!err) ? "at least one error" : "no errors");
                     cb();
